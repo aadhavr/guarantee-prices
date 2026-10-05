@@ -22,7 +22,6 @@ from make_charts import (ANNOTATIONS, BUILDING, COL, DEBT_MM, MW, PHASES, TENANT
 
 OUT = P("output", "interactive")
 PLOTLY = "https://cdn.plot.ly/plotly-2.35.2.min.js"
-SOURCE = "Source: FINRA TRACE, SEC filings, U.S. Treasury, ICE BofA via FRED. Author's calculations."
 FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 
 PAGE = """<!doctype html>
@@ -34,14 +33,13 @@ PAGE = """<!doctype html>
   html, body {{ margin: 0; height: 100%; background: transparent; font-family: {font}; }}
   #wrap {{ display: flex; flex-direction: column; height: 100%; }}
   #chart {{ flex: 1; min-height: 280px; }}
-  .src {{ font-size: 11px; color: #888; padding: 2px 6px 4px; }}
 </style></head>
-<body><div id="wrap"><div id="chart"></div><div class="src">{source}</div></div>
+<body><div id="wrap"><div id="chart"></div></div>
 <script>
   var data = {data};
   var layout = {layout};
-  Plotly.newPlot("chart", data, layout, {{responsive: true, displaylogo: false,
-    modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toggleSpikelines"]}});
+  // no toolbar: it covered the charts. Hover still shows values; drag to zoom, double-click to reset.
+  Plotly.newPlot("chart", data, layout, {{responsive: true, displayModeBar: false}});
 </script></body></html>
 """
 
@@ -59,7 +57,7 @@ def base_layout(**kw):
 
 def write(name, title, data, layout):
     os.makedirs(OUT, exist_ok=True)
-    html = PAGE.format(title=title, plotly=PLOTLY, font=FONT, source=SOURCE,
+    html = PAGE.format(title=title, plotly=PLOTLY, font=FONT,
                        data=json.dumps(data), layout=json.dumps(layout))
     with open(os.path.join(OUT, name), "w") as f:
         f.write(html)
@@ -119,7 +117,7 @@ def fig_weekly(rows):
     layout = base_layout(
         hovermode="x unified",
         xaxis={"showgrid": False, "tickformat": "%b '%y", "hoverformat": "Week of %b %d, %Y"},
-        yaxis={"title": {"text": "Extra yield over Treasuries (basis points)"}, "rangemode": "tozero",
+        yaxis={"title": {"text": "Extra yield over Treasuries (basis points)", "font": {"size": 12}}, "rangemode": "tozero",
                "gridcolor": "#eee"},
         legend={"orientation": "h", "y": -0.12, "x": 0, "font": {"size": 12}},
         margin={"l": 60, "r": 20, "t": 20, "b": 90},
@@ -133,20 +131,27 @@ def fig_echo():
     if not rows:
         return
     rows = rows[::-1]  # plotly draws the first bar at the bottom
-    data = [{"type": "bar", "orientation": "h",
-             "y": [r[0] for r in rows], "x": [r[1] for r in rows],
+    names = [r[0] for r in rows]
+    hi = [r[1] + 1.96 * r[2] for r in rows]
+    lo = [r[1] - 1.96 * r[2] for r in rows]
+    data = [{"type": "bar", "orientation": "h", "y": names, "x": [r[1] for r in rows],
              "marker": {"color": [r[3] for r in rows]},
-             "error_x": {"type": "data", "array": [1.96 * r[2] for r in rows], "color": "#333", "thickness": 1.2},
-             "customdata": [[r[2], r[1] - 1.96 * r[2], r[1] + 1.96 * r[2]] for r in rows],
-             "hovertemplate": ("<b>%{y}</b><br>Moves %{x:.2f} points per 1-point move in CoreWeave's spread"
+             "error_x": {"type": "data", "array": [1.96 * r[2] for r in rows], "color": "#333",
+                         "thickness": 1.2, "width": 4},
+             "customdata": [[r[2], l_, h_] for r, l_, h_ in zip(rows, lo, hi)],
+             "hovertemplate": ("<b>%{y}</b><br>moves %{x:.2f} points per 1-point move in CoreWeave's spread"
                                "<br>95% interval: %{customdata[1]:.2f} to %{customdata[2]:.2f}"
-                               "<br>(s.e. %{customdata[0]:.2f})<extra></extra>"),
-             "text": [f"{r[1]:.2f}" for r in rows], "textposition": "outside", "cliponaxis": False}]
+                               " (s.e. %{customdata[0]:.2f})<extra></extra>")},
+            # the value label sits just past the end of the error bar, so the two never overlap
+            {"type": "scatter", "mode": "text", "y": names, "x": [max(h_, 0) + 0.03 for h_ in hi],
+             "text": [f"<b>{r[1]:.2f}</b>" for r in rows], "textposition": "middle right",
+             "textfont": {"size": 13}, "hoverinfo": "skip", "showlegend": False, "cliponaxis": False}]
     layout = base_layout(
-        xaxis={"title": {"text": "How much the bond's spread moves when CoreWeave's moves by 1 point"},
+        xaxis={"title": {"text": "Points moved per 1-point move in CoreWeave's spread", "font": {"size": 12}},
+               "range": [min(0, min(lo)) - 0.05, max(hi) + 0.18],
                "zeroline": True, "zerolinecolor": "#444", "gridcolor": "#eee"},
         yaxis={"automargin": True}, showlegend=False, bargap=0.35,
-        margin={"l": 20, "r": 40, "t": 10, "b": 60})
+        margin={"l": 20, "r": 20, "t": 10, "b": 55})
     write("fig2_echo.html", "Echo of CoreWeave's credit", data, layout)
 
 
@@ -167,11 +172,12 @@ def fig_twins(rows):
              "text": [f"{i[1]:.0f} bp  (price ≈ {i[2]:.1f})" if i[2] else f"{i[1]:.0f} bp" for i in items],
              "textposition": "outside", "cliponaxis": False,
              "customdata": [i[2] for i in items],
-             "hovertemplate": "%{x:.0f} bp over Treasuries<br>price ≈ %{customdata:.1f} cents per dollar<extra></extra>"}]
+             "hovertemplate": "%{x:.0f} bp · price ≈ %{customdata:.1f}<extra></extra>"}]
     layout = base_layout(
-        xaxis={"title": {"text": f"Spread over Treasuries (bp), week of {last['week_start']}"},
-               "range": [0, max(i[1] for i in items) * 1.45], "gridcolor": "#eee"},
+        xaxis={"title": {"text": f"Spread over Treasuries (bp), week of {last['week_start']}", "font": {"size": 12}},
+               "range": [0, max(i[1] for i in items) * 1.7], "gridcolor": "#eee"},
         yaxis={"automargin": True}, showlegend=False, bargap=0.45,
+        hoverlabel={"align": "left"},
         margin={"l": 20, "r": 20, "t": 10, "b": 60})
     write("fig3_twin_bonds.html", "Same coupon, different risk", data, layout)
 
@@ -195,7 +201,7 @@ def fig_per_mw(rows):
               "arrowhead": 0, "ax": -60, "ay": -40, "font": {"color": COL["building"], "size": 13}}]
     layout = base_layout(
         xaxis={"showgrid": False, "tickformat": "%b '%y"},
-        yaxis={"title": {"text": "Interest saved per MW per year ($ thousands)"}, "gridcolor": "#eee",
+        yaxis={"title": {"text": "Interest saved per MW per year ($ thousands)", "font": {"size": 12}}, "gridcolor": "#eee",
                "zeroline": True, "zerolinecolor": "#444"},
         showlegend=False, annotations=notes,
         margin={"l": 70, "r": 30, "t": 20, "b": 50})
