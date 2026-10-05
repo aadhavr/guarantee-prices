@@ -1,0 +1,6 @@
+sources/cache/
+output/
+__pycache__/
+data/bond_trades/*.csv
+!data/bond_trades/provenance.csv
+data/bond_trades/raw/*.json

@@ -1,0 +1,8 @@
+deal_id,role,label
+APLD_2030,building,Applied Digital 9.250% 2030 (CoreWeave leases moved to SPV)
+CRWV_2030,tenant,CoreWeave 9.250% 2030 (unsecured)
+APLD_2031B,building_not_moved,Applied Digital 7.000% 2031 (CoreWeave Building 4 lease)
+APLD_2031A,ig_tenant,Applied Digital 6.750% 2031 (investment-grade hyperscaler lease)
+CIFR_2030,google_backstop,Cipher 7.125% 2030 (Fluidstack lease; Google backstop)
+WULF_2030,google_backstop_2,TeraWulf 7.750% 2030 (Fluidstack lease; Google backstop)
+CRWV_2032_USD,tenant_check,CoreWeave 9.625% 2032 (unsecured)

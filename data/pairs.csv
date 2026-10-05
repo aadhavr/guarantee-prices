@@ -1,0 +1,4 @@
+pair_id,deal_a,deal_b,label
+NOV2025,APLD_2030,CIFR_2030,CoreWeave-leased building vs Google-backstopped building
+JUN2026,APLD_2031B,CRWV_2032_USD,CoreWeave-leased building vs CoreWeave unsecured
+APR2026,CRWV_2031A_TAP,CRWV_2031A,CoreWeave add-on vs original one week earlier
