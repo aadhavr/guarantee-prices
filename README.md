@@ -1,33 +1,114 @@
-# The price of a Google guarantee
+# The bond market trusts an unbuilt data center more than the neocloud that rents it
 
-Who carries the credit risk of the AI buildout? Debt on AI data centers and GPU fleets, priced at issue, grouped by who stands behind it (Google backstop, investment-grade tenant, CoreWeave as tenant, CoreWeave itself).
+Replication code and data for the blog post of the same name (Aadhav Rajesh, October 5, 2026):
+<https://www.aadhavrajesh.com/posts/bond-market-neoclouds/>
 
-## Run
+The post asks whether lenders to a data center that CoreWeave rents price it like a loan to CoreWeave. It compares Applied Digital's bonds (paid from CoreWeave leases) with CoreWeave's own bonds, first at issue and then week by week in the secondary market.
 
-Python 3.9+, standard library only.
+## What you can and cannot reproduce
+
+| Part of the post | Needs | Reproducible from this repo? |
+|---|---|---|
+| Terms and spreads at issue (Table 1) | SEC filings, Treasury yields, FRED | Yes. Run `./run_all.sh`. |
+| Weekly spreads, echo regression, placebo test, charts | FINRA trade history | Only after you export the trades yourself (see "FINRA trade data"). The trade files are not in the repo. |
+
+FINRA's terms do not allow redistribution of the trade files, and ICE restricts reproduction of its index series. The repo publishes the code, the CUSIPs, the date ranges and the SHA-256 hashes (`data/bond_trades/provenance.csv`), so you can check that your export is the same data.
+
+## Requirements
+
+- Python 3.9 or later. The pipeline uses the standard library only.
+- `matplotlib` for `make_charts.py` and `make_interactive.py` (`pip install matplotlib`). The interactive figures load plotly.js from a CDN in the reader's browser, so Python needs no plotly package.
+- Internet access to sec.gov, treasury.gov and fred.stlouisfed.org for the first run. Later runs can use `--offline`.
+- A contact string for the SEC, which requires a descriptive User-Agent:
 
 ```bash
-export SEC_USER_AGENT="Aadhav Rajesh your@email.com"   # SEC requires a contact User-Agent
+export SEC_USER_AGENT="Your Name your@email.com"
+```
+
+## Quick start
+
+```bash
+git clone https://github.com/aadhavr/guarantee-prices.git
+cd guarantee-prices
+export SEC_USER_AGENT="Your Name your@email.com"
 ./run_all.sh              # download sources, verify, calculate
 ./run_all.sh --offline    # rerun from sources/cache and sources/manual only
 ```
 
-Steps:
+`run_all.sh` runs these steps in order. Without trade files in `data/bond_trades/`, it finishes step 5 and prints a message that the event study is skipped.
 
-1. `fetch_treasury.py` downloads the Treasury par yield curve CSV for each year in `data/deals.csv` and writes `data/treasury_cmt.csv` (2/3/5/7-year yields on each pricing date).
-2. `verify_sources.py` downloads every source in `data/evidence.csv` and checks, for each row: the evidence text is in the source; the token is in the evidence; the token parses to the value; the value equals the field in `data/deals.csv`. It also lists required values with no evidence row (MISSING). Output: `output/verification.csv`.
-3. `spreads.py` uses only values that passed. Any deal with an unverified required value goes to `output/excluded.csv` with the reason. Outputs: `output/spreads.csv` (fixed rate), `output/floating.csv` (SOFR spreads), `output/excluded.csv`.
+| Step | Script | What it does | Output (in `output/`, not committed) |
+|---|---|---|---|
+| 1 | `fetch_treasury.py` | Treasury par yield curve for each year in `data/deals.csv` | `data/treasury_cmt.csv` |
+| 2 | `fetch_market.py` | ICE BofA high-yield OAS indexes from FRED, on each pricing and event date | `data/market_index.csv` |
+| 3 | `verify_sources.py` | Downloads every source in `data/evidence.csv` and checks each value (rules below) | `verification.csv` |
+| 4 | `spreads.py` | Yield and spread at issue, using only values that passed. Deals with an unverified value go to `excluded.csv` | `spreads.csv`, `floating.csv`, `excluded.csv` |
+| 5 | `relative_spreads.py` | Each spread minus the high-yield index, and the same-week pairs in `data/pairs.csv` | `relative_spreads.csv`, `pairs.csv` |
+| 6 | `bond_event_study.py` | Difference in differences around the 2026-03-30 lease move, with a placebo test on every other date | `placebo_LEASE_MOVE.csv` and printed estimates |
+| 7 | `spread_timeseries.py` | Weekly spread of each bond in `data/series.csv`, the high-yield index, and the gap to the tenant's bond | `spread_weekly.csv`, `spread_weekly.svg` |
+| 8 | `beta_break.py` | Echo regression: weekly change in the building bond's spread on the tenant's, before and after the break | `beta_break.csv`, `sensitivity_compare.csv` |
+
+Steps 6 to 8 run only when trade files exist. After `run_all.sh`, make the figures:
+
+```bash
+python3 make_charts.py        # static PNG charts and tables -> output/charts/
+python3 make_interactive.py   # the four interactive figures -> output/interactive/
+```
+
+## FINRA trade data
+
+FINRA's public bond page has no export, and 144A trade history cannot be downloaded by script without a data agreement. The trade files used in the post were collected from FINRA's bond pages with `finra_console_scraper.js`.
+
+1. Open the bond's page on FINRA's site and accept the user agreement.
+2. Run `finra_console_scraper.js` in your browser console. Instructions are at the top of the file. It repeats the page's own request, 50 trades per page, with a pause between pages, and downloads one JSON file.
+3. Convert and record it:
+
+```bash
+python3 convert_trades.py data/bond_trades/raw/APLD_2030_finra_raw.json --cusip 00202DAA5
+```
+
+The converter checks that no page is missing, removes trades repeated across pages, checks the date range, parses capped sizes such as "1MM+", writes `data/bond_trades/<deal_id>.csv`, and records the SHA-256 of the raw file and the CSV in `provenance.csv`. The event study refuses any trade file whose hash changed after it was recorded.
+
+Collected for the post: trades from 2025-11-13 to 2026-10-02, six bonds.
+
+| deal_id | Bond | CUSIP |
+|---|---|---|
+| APLD_2030 | Applied Digital 9.250% 2030 | 00202DAA5 |
+| CRWV_2030 | CoreWeave 9.250% 2030 | 21873SAB4 |
+| APLD_2031B | Applied Digital 7.000% 2031 (Building 4) | 03790NAA5 |
+| CRWV_2032_USD | CoreWeave 9.625% 2032 | 21873SAK4 |
+| APLD_2031A | Applied Digital 6.750% 2031 | 03772CAA1 |
+| WULF_2030 | TeraWulf 7.750% 2030 | 982911AA7 |
+
+`data/series.csv` also lists `CIFR_2030` (Cipher 7.125% 2030). It has no trade file, so the pipeline skips it in steps 6 to 8. It is used in the issue-date comparison only.
+
+FINRA can correct or add reports after your export, so a new export may not match the recorded hash exactly. If it differs, compare the trade counts and date range first.
+
+## Where the numbers in the post come from
+
+| In the post | Script | Output |
+|---|---|---|
+| Table 1: spreads at issue, same-week pairs (294 bp, 264 bp) | `spreads.py`, `relative_spreads.py` | `spreads.csv`, `pairs.csv` |
+| Figure 1: weekly spreads | `spread_timeseries.py` | `spread_weekly.csv` |
+| Figure 2 and the appendix: echo before and after (0.47 to 0.10), comparison bonds | `beta_break.py` | `beta_break.csv`, `sensitivity_compare.csv` |
+| Figure 3: twin bonds, same coupon | `make_charts.py`, `make_interactive.py` | `charts/`, `interactive/` |
+| Placebo test (183 dates, 27%) | `bond_event_study.py` | `placebo_LEASE_MOVE.csv` |
+| Figure 4: dollars per megawatt | `make_charts.py` | `charts/chart4_per_mw.png` |
+
+Figure 4 uses two constants typed at the top of `make_charts.py`: $2.35 billion of debt and 250 MW of CoreWeave leases. Both come from Applied Digital's filings, cited in the post (notes 15 and 4).
 
 ## Data rules
 
-- `data/deals.csv`: terms of each security. Values here are claims until `verify_sources.py` passes them.
-- `data/evidence.csv`: one row per value. `token` is the exact text that must appear in `evidence`; `evidence` is an exact, contiguous quote from `source_url` (no "..."). Matching ignores HTML tags, entities, quote style and whitespace.
-- Primary sources first: SEC filings, then the company's own press release. Secondary sources are not used for values.
-- No estimates. A value without a passing evidence row is not used.
+- `data/deals.csv`: the terms of each security. A value is a claim until `verify_sources.py` passes it.
+- `data/evidence.csv`: one row per value. `token` is the exact text that must appear in `evidence`. `evidence` is an exact, contiguous quote from `source_url` with no "...". Matching ignores HTML tags, entities, quote style and whitespace.
+- For each row the script checks that the evidence is in the source, the token is in the evidence, the token parses to the value, and the value equals the field in `deals.csv`.
+- Primary sources only: SEC filings, then the company's own press release. No estimates. A value without a passing evidence row is not used.
+- Four deals have `include = N` in `deals.csv` and are not used: `CIFR_2030_TAP` (add-on, no new comparison), `CRWV_2032_EUR` (euro bond), `LAMBDA_TLB` (private company, no filing), `CRWV_2031_9` (control bond, evidence incomplete).
+- Excluded by design: convertible notes (the coupon includes an equity option) and euro notes.
 
-## Sites that block scripts
+### Sites that block scripts
 
-Company investor-relations pages and GlobeNewswire can refuse scripted downloads. If a row shows ERROR, open the URL in a browser, save the page as HTML, and put it in `sources/manual/` named with the key printed by:
+Company investor-relations pages and GlobeNewswire can refuse scripted downloads. If a row shows ERROR, open the URL in a browser, save the page as HTML, and put it in `sources/manual/` under the key printed by:
 
 ```bash
 python3 -c "from common import url_key; print(url_key('PASTE_URL'))"
@@ -37,86 +118,25 @@ Then run `./run_all.sh --offline`.
 
 ## Methods
 
-- Yield: bond-equivalent (semiannual) yield from dated cash flows at the issue price, first coupon pro-rated from the pricing date.
-- Amortizing notes issued below par: the indenture schedule is not in the verified data, so the script reports two bounds (all principal at maturity; all principal at the first amortization date). Any real schedule gives a yield between the two. Notes issued at par yield the coupon whatever the schedule.
-- Spread: yield minus the Treasury par yield interpolated at the life of the cash flows on the pricing date.
-- Excluded by design: convertible notes (coupon includes an equity option); EUR notes (compare with Bunds).
+- **Yield:** bond-equivalent (semiannual) yield from dated cash flows at the issue price, with the first coupon pro-rated from the pricing date.
+- **Spread:** yield minus the Treasury par yield interpolated at the life of the cash flows on the pricing date.
+- **Amortizing notes below par:** the indenture schedule is not in the verified data, so the scripts report two bounds: all principal at maturity, and all principal at the first amortization date. Any real schedule gives a yield between them. Notes issued at par yield the coupon whatever the schedule. The post reports the conservative end.
+- **Event study:** difference in differences on secondary-market spreads, with windows of 10 calendar days before and after the event in `data/events.csv`. The event date must be proved in the source text. The placebo repeats the estimate at every date in the trade sample more than 20 days from the event, with at least 3 trade days in each window. Placebo windows overlap, so the shares are ranks, not exact p-values.
+- **Echo regression:** weekly changes of the building bond's spread on weekly changes of the tenant's spread and the high-yield index, with every term interacted with a post-break dummy. Newey-West standard errors (Bartlett weights, small-sample factor n/(n-k)) at lags 2, 4 and 8. P-values use the normal approximation, so with about 45 weeks read them as approximate.
+- **Break date:** the default break is the 2026-03-30 lease move. A scan over break dates shows the best-fitting date depends on one week, so the date of the change is not identified. Report the change, not the date. Use `--break YYYY-MM-DD` to test another date.
 
-## Status before first local run
+## Maintenance tools
 
-Fully evidenced from SEC filings: `APLD_2030` (CoreWeave tenant) and `CIFR_2030` (Google backstop). This pair is the November 2025 comparison.
+Run these by hand. `run_all.sh` does not call them.
 
-Open items. Add an evidence row for each, then rerun:
+- `find_evidence.py`: searches the issuer's 8-K, 10-Q and 10-K filings for values that have not passed. Writes `output/evidence_candidates.csv`.
+- `accept.py` and `accept_commands.sh`: copy one reviewed candidate into `data/evidence.csv` and fill the value in `data/deals.csv`.
+- `manual_evidence.py`: show text around a pattern in a source, and add an evidence row by hand.
+- `search_deals.py`: EDGAR full-text search for more AI data center and GPU financings. Output goes to `output/candidate_deals.csv` for review by hand.
+- `record_trades.py`: record the provenance of a hand-saved trade file.
 
-| Deal | Missing | Where to find it |
-|---|---|---|
-| WULF_2030 | maturity date | TeraWulf 8-K for the notes closing (indenture) |
-| APLD_2031A | maturity date, first amortization date | Applied Digital 8-K, 2026-03-10, exhibit 4.1 |
-| APLD_2031B | maturity date; whether the Building 4 Lease moved to CoreWeave Compute Acquisition Co. VIII | Applied Digital 8-K for the June 2026 closing; next 10-Q |
-| CRWV_2031A, CRWV_2031A_TAP, CRWV_2032_USD | pricing date | CoreWeave 8-K for each offering (the IR pages may show the date once downloaded) |
-| CIFR_2030_TAP | pricing date, 100.250% issue price, first amortization date | Cipher 8-K exhibit 99.1 for the add-on pricing |
-| CRWV_DDTL4 | SOFR spread, borrower, customer | CoreWeave 8-K for DDTL 4.0 (credit agreement) |
-| CRWV_DDTL5 | pricing date, SOFR spread | CoreWeave 8-K, 2026-05-18 |
-| LAMBDA_TLB | pricing date, SOFR spread | lender, agent or rating agency release (Lambda is private) |
+## Limits
 
-Also needed for the write-up (not in the pipeline yet): a high-yield credit index on the pricing dates, so a change between November 2025 and June 2026 is not read as CoreWeave-specific when the whole market moved.
-
-## Tools for the next steps
-
-Run these by hand; `run_all.sh` runs everything else.
-
-**1. Close open items: `find_evidence.py`**
-Reads `output/verification.csv`, and for each required value that has not passed, searches the issuer's 8-K, 10-Q and 10-K filings around the pricing date. Only sentences that contain the security's coupon count, so a match belongs to the right notes. Output: `output/evidence_candidates.csv`. Nothing is added automatically: confirm each candidate in the source, copy the row into `data/evidence.csv`, put the value in `data/deals.csv`, rerun.
-```bash
-python3 find_evidence.py                    # all open items
-python3 find_evidence.py --deal APLD_2031B  # one deal
-```
-Needs the `ticker` column in `data/deals.csv`. Private issuers (Lambda) are not on EDGAR.
-
-**2. Market control: `fetch_market.py` then `relative_spreads.py`** (both in `run_all.sh`)
-Downloads ICE BofA high-yield OAS indexes from FRED for each pricing date and event date (`data/market_index.csv`), then writes each spread minus the index (`output/relative_spreads.csv`) and the same-week pairs defined in `data/pairs.csv` (`output/pairs.csv`). The old group summary was removed because it mixed deals from different periods. License: ICE restricts reproduction of the index; publish derived numbers, not the series. Check the FRED series notes.
-
-**3. More deals: `search_deals.py`**
-EDGAR full-text search over 8-Ks for AI data center and GPU financings, then extraction of coupon, price, size and SOFR margin from sentences that price or close a deal. Output: `output/candidate_deals.csv`, with `already_in_panel` marked. Review by hand; add accepted deals to `data/deals.csv` (with `ticker`), then use `find_evidence.py`.
-```bash
-python3 search_deals.py --start 2025-01-01 --end 2026-09-30
-```
-
-**4. Event test: `bond_event_study.py`** (run by `run_all.sh` when trade files exist)
-Difference in differences on secondary-market spreads around an event in `data/events.csv`: treated bond (APLD_2030, paid from CoreWeave leases) against control bond (CRWV_2030, CoreWeave's own notes), windows of 10 calendar days before and after.
-- The event date must be proved: `evidence` must be in the source and `date_token` in the evidence.
-- Both bonds need verified coupon and maturity. CRWV_2030 is in `deals.csv` as a control only; find its terms with `python3 find_evidence.py --deal CRWV_2030`.
-- Trade data: FINRA trade history for 144A notes is not downloadable by script without a data agreement. Export the trades by hand from FINRA's bond pages, save as `data/bond_trades/<deal_id>.csv` with columns `trade_date` (YYYY-MM-DD), `price`, optional `quantity`, then record provenance right away:
-```bash
-python3 record_trades.py APLD_2030 <CUSIP> "FINRA bond trade history, exported by hand"
-```
-  The event study refuses any trade file whose SHA-256 changed after it was recorded.
-- Timing caveat: the leases moved on 2026-03-30 (10-K), but the market may have learned later. Add a second event with the first public disclosure date once you find it in an 8-K.
-
-**5. Spreads on the same dates: `spread_timeseries.py`** (run by `run_all.sh` when trade files exist)
-Weekly spread over Treasuries for each bond in `data/series.csv`, from the FINRA trade files, plus the HY index and the gap between the `building` bond and the `tenant` bond. Outputs: `output/spread_weekly.csv` (with the number of trade days behind each weekly value) and `output/spread_weekly.svg` (open in a browser). It prints the first week in which the building bond priced tighter than the tenant's own bond. Add rows to `data/series.csv` to plot more bonds (each needs a recorded trade file and verified coupon and maturity).
-
-**6. Getting the FINRA trades: `finra_console_scraper.js` then `convert_trades.py`**
-FINRA's public bond page has no export. The scraper runs in your own browser, on the bond page, after you accept the user agreement: it repeats the page's own trade-history request, 50 trades per page, with a pause between pages, and downloads one JSON file. Instructions are at the top of the file. Then:
-```bash
-python3 convert_trades.py data/bond_trades/raw/APLD_2030_finra_raw.json --cusip 00202DAA5
-python3 convert_trades.py data/bond_trades/raw/CRWV_2030_finra_raw.json --cusip 21873SAB4
-```
-The converter checks that no page is missing, removes trades repeated across pages, checks the date range, parses capped sizes such as "1MM+", writes `data/bond_trades/<deal>.csv`, and records the SHA-256 of both the raw file and the CSV in `provenance.csv`. Raw files stay out of the repository (`.gitignore`): publish the CUSIPs, the date range and the hashes.
-
-**7. Robustness (in `run_all.sh`)**
-- Placebo test: `bond_event_study.py` repeats the difference in differences at every date in the trade sample more than 20 days from the event, with at least 3 trade days in each window. It reports the number of placebo dates, their sample standard deviation s, and the share of placebo effects at least as large as the event's. Placebo windows overlap, so the shares describe a rank, not an exact p-value. Output: `output/placebo_<event_id>.csv`.
-- Amortization bounds: `spread_timeseries.py` adds a second case for amortizing notes with a verified first amortization date (all principal at that date). With the bullet case, it brackets any real schedule; `gap_min_bp` and `gap_max_bp` give the range of the building-minus-tenant gap, and the chart shades it.
-
-**8. Sensitivity test: `beta_break.py`** (in `run_all.sh`)
-Regresses weekly changes of the building bond's spread on weekly changes of the tenant's own spread and the HY index, with every term interacted with a post-break dummy (default break: the LEASE_MOVE date). Reports the sensitivity before and after, the change, and Newey-West standard errors for lag lengths L = 2, 4, 8, on the bullet series, the first-amortization series, and weeks with at least 3 trade days. `--break YYYY-MM-DD` tests another date. Output: `output/beta_break.csv`. A scan over break dates showed that the best-fitting date depends on one week, so the date of the change is not identified; report the change, not the date.
-
-**9. All bonds (`data/series.csv`)**
-Seven bonds: the reference building (APLD_2030, leases moved to the CoreWeave SPV), the tenant (CRWV_2030), Building 4 (APLD_2031B, lease not moved), an investment-grade hyperscaler building (APLD_2031A), two Google-backstopped buildings (CIFR_2030, WULF_2030), and a second CoreWeave bond (CRWV_2032_USD). Each `role` must be unique. Bonds without a trade file are skipped, so the pipeline runs after each new scrape. `spread_timeseries.py` adds a gap column against the tenant for every bond; `beta_break.py` part 2 estimates each bond's sensitivity to the tenant's spread and its difference from APLD_2030, over all common weeks and from the break week (`output/sensitivity_compare.csv`).
-
-**10. Charts for the post: `make_charts.py`** (needs `pip install matplotlib`; run after `run_all.sh`)
-Writes PNG images to `output/charts/`: the twin-bond snapshot, the weekly spread chart (shaded range over repayment schedules, phases, dated notes, the lease move), the echo chart with 95% intervals, the dollars-per-MW graphic, and two tables (also saved as CSV for pasting into a doc). `--no-titles` leaves titles out, for captions written in the doc. Edit `ANNOTATIONS` and `PHASES` at the top of the file; cite each dated note in the post.
-
-**10. Figures for the post**
-- `make_charts.py`: static PNG charts and tables (`output/charts/`), for documents. Needs matplotlib.
-- `make_interactive.py`: the same four figures as standalone interactive HTML files (`output/interactive/`), for the blog. Each file contains its own data and loads plotly.js from a CDN in the reader's browser. It imports the settings and estimates from `make_charts.py`, so the two always agree.
+- Six bonds and one tenant.
+- FINRA 144A trades can be thin. `spread_weekly.csv` shows the number of trade days behind each weekly value.
+- The index series from ICE is not in the repo. Publish derived numbers, not the series.
